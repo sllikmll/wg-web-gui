@@ -431,6 +431,85 @@ def write_server_conf(server: dict[str, Any], content: str) -> dict[str, Any]:
     return ssh_run(server, cmd, timeout=90)
 
 
+def wg_easy_json_path(server: dict[str, Any]) -> str:
+    return str(Path(server.get("config_path") or "/etc/wireguard/wg0.conf").with_suffix(".json"))
+
+
+def read_wg_easy_json(server: dict[str, Any]) -> dict[str, Any] | None:
+    r = cexec(server, f"cat {q(wg_easy_json_path(server))}", timeout=25)
+    if not r.get("ok") or not str(r.get("out") or "").strip():
+        return None
+    try:
+        data = json.loads(r["out"])
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("clients"), (dict, list)):
+        return None
+    if isinstance(data.get("clients"), list):
+        data["clients"] = {str(item.get("id") or uuid.uuid4()): item for item in data["clients"] if isinstance(item, dict)}
+    return data
+
+
+def write_wg_easy_json(server: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    content = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+    b64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    path = wg_easy_json_path(server)
+    inner = f"base64 -d > {q(path)}"
+    cmd = f"printf %s {q(b64)} | docker exec -i {q(server['container'])} sh -lc {q(inner)} && docker restart {q(server['container'])} >/dev/null"
+    return ssh_run(server, cmd, timeout=90)
+
+
+def client_tunnel_address_for_wg_easy(client: dict[str, Any]) -> str:
+    return parse_client_tunnel_ip(str(client.get("address") or "")) or str(client.get("address") or "").split("/", 1)[0].strip()
+
+
+def find_wg_easy_client_id(data: dict[str, Any], client: dict[str, Any]) -> str | None:
+    clients = data.get("clients") or {}
+    wanted_id = str(client.get("wg_easy_id") or "")
+    if wanted_id and wanted_id in clients:
+        return wanted_id
+    pub = str(client.get("pubkey") or "")
+    for cid, item in clients.items():
+        if isinstance(item, dict) and pub and item.get("publicKey") == pub:
+            return str(cid)
+    return None
+
+
+def apply_client_to_wg_easy_json(server: dict[str, Any], client: dict[str, Any], remove: bool = False) -> dict[str, Any] | None:
+    data = read_wg_easy_json(server)
+    if data is None:
+        return None
+    clients = data.setdefault("clients", {})
+    cid = find_wg_easy_client_id(data, client)
+    if remove:
+        if cid and cid in clients:
+            clients.pop(cid, None)
+        wr = write_wg_easy_json(server, data)
+        if not wr.get("ok"):
+            return {"ok": False, "stage": "write_restart_wg_easy_json", "detail": wr}
+        return wait_for_peer(server, client["pubkey"], remove=True, timeout=30, delay=1.0)
+
+    cid = cid or str(client.get("wg_easy_id") or uuid.uuid4())
+    client["wg_easy_id"] = cid
+    existing = clients.get(cid, {}) if isinstance(clients.get(cid), dict) else {}
+    created_at = existing.get("createdAt") or datetime.utcnow().isoformat(timespec="milliseconds") + "Z"
+    clients[cid] = {
+        "id": cid,
+        "name": str(client.get("name") or "client"),
+        "address": client_tunnel_address_for_wg_easy(client),
+        "privateKey": str(client.get("privkey") or ""),
+        "publicKey": str(client.get("pubkey") or ""),
+        "preSharedKey": str(client.get("preshared_key") or ""),
+        "createdAt": created_at,
+        "updatedAt": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        "enabled": True,
+    }
+    wr = write_wg_easy_json(server, data)
+    if not wr.get("ok"):
+        return {"ok": False, "stage": "write_restart_wg_easy_json", "detail": wr}
+    return wait_for_peer(server, client["pubkey"], remove=False, timeout=30, delay=1.0)
+
+
 def show_command(server: dict[str, Any]) -> str:
     return f"wg show {q(server['interface'])}"
 
@@ -837,6 +916,16 @@ def apply_client_to_server(server: dict[str, Any], client: dict[str, Any], remov
     valid = validate_server(server)
     if not valid["ok"]:
         return {"ok": False, "stage": "validate", "detail": valid}
+
+    # wg-easy v14 regenerates wg0.conf from wg0.json on restart. Writing only
+    # wg0.conf makes the peer disappear immediately after docker restart, so the
+    # runtime verification times out. If wg0.json exists, treat it as the source
+    # of truth; otherwise fall back to vanilla WireGuard config editing.
+    if str(server.get("container") or "") == "wg-easy":
+        applied = apply_client_to_wg_easy_json(server, client, remove=remove)
+        if applied is not None:
+            return applied
+
     conf = read_server_conf(server)
     if not conf:
         return {"ok": False, "stage": "read_conf", "err": "empty or unreadable config"}
