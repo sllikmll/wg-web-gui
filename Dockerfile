@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PORT=5173 \
-    AWG_DATA_DIR=/data
+    WG_DATA_DIR=/data
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends openssh-client sshpass ca-certificates \
@@ -18,11 +18,11 @@ RUN python -m pip install --upgrade pip \
 COPY app.py ./
 COPY templates ./templates
 
-RUN useradd -r -u 10001 -g users -d /app -s /usr/sbin/nologin awgweb \
+RUN useradd -r -u 10001 -g users -d /app -s /usr/sbin/nologin wgweb \
     && mkdir -p /data \
-    && chown -R awgweb:users /app /data
+    && chown -R wgweb:users /app /data
 
-USER awgweb
+USER wgweb
 EXPOSE 5173
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \

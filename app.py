@@ -26,18 +26,18 @@ from nacl.public import PrivateKey
 from nacl.bindings import crypto_scalarmult_base
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("AWG_SECRET_KEY", "dev-change-me")
+app.secret_key = os.environ.get("WG_SECRET_KEY", os.environ.get("AWG_SECRET_KEY", "dev-change-me"))
 
-DATA_DIR = Path(os.environ.get("AWG_DATA_DIR", str(Path.home() / "awg-web-gui-data")))
+DATA_DIR = Path(os.environ.get("WG_DATA_DIR", os.environ.get("AWG_DATA_DIR", str(Path.home() / "wg-web-gui-data"))))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 SERVERS_FILE = DATA_DIR / "servers.json"
 CLIENTS_FILE = DATA_DIR / "clients.json"
 USERS_FILE = DATA_DIR / "users.json"
-DB_FILE = DATA_DIR / "awg-web-gui.db"
-POLL_INTERVAL = int(os.environ.get("AWG_POLL_INTERVAL", "30"))
-ONLINE_THRESHOLD = int(os.environ.get("AWG_ONLINE_THRESHOLD", "180"))
-METADATA_REFRESH_INTERVAL = int(os.environ.get("AWG_METADATA_REFRESH_INTERVAL", "300"))
-ENABLE_POLLER = os.environ.get("AWG_ENABLE_POLLER", "1") == "1"
+DB_FILE = DATA_DIR / "wg-web-gui.db"
+POLL_INTERVAL = int(os.environ.get("WG_POLL_INTERVAL", os.environ.get("AWG_POLL_INTERVAL", "30")))
+ONLINE_THRESHOLD = int(os.environ.get("WG_ONLINE_THRESHOLD", os.environ.get("AWG_ONLINE_THRESHOLD", "180")))
+METADATA_REFRESH_INTERVAL = int(os.environ.get("WG_METADATA_REFRESH_INTERVAL", os.environ.get("AWG_METADATA_REFRESH_INTERVAL", "300")))
+ENABLE_POLLER = os.environ.get("WG_ENABLE_POLLER", os.environ.get("AWG_ENABLE_POLLER", "1")) == "1"
 
 DEFAULT_ADMIN = {"username": "admin", "password_hash": hashlib.sha256(b"admin").hexdigest()}
 
@@ -132,24 +132,17 @@ def parse_client_tunnel_ip(address: str) -> str:
         return ""
 
 VERSION_DEFAULTS = {
-    "1.5": {
-        "container": "amnezia-awg",
+    "wireguard": {
+        "container": "wg-easy",
         "interface": "wg0",
-        "config_path": "/opt/amnezia/awg/wg0.conf",
-        "port": 8723,
-        "show_tools": ["wg", "awg"],
-    },
-    "2.0": {
-        "container": "amnezia-awg2",
-        "interface": "awg0",
-        "config_path": "/opt/amnezia/awg/awg0.conf",
-        "port": 9723,
-        "show_tools": ["awg", "wg"],
+        "config_path": "/etc/wireguard/wg0.conf",
+        "port": 51820,
+        "show_tools": ["wg"],
     },
 }
-
-AWG_PARAM_KEYS = ["Jc", "Jmin", "Jmax", "S1", "S2", "S3", "S4", "H1", "H2", "H3", "H4", "I1"]
-AWG_PARAM_CANON = {k.lower(): k for k in AWG_PARAM_KEYS}
+# Vanilla WireGuard has no extra client-side interface params.
+CLIENT_INTERFACE_PARAM_KEYS: list[str] = []
+CLIENT_INTERFACE_PARAM_CANON: dict[str, str] = {}
 
 
 def now() -> str:
@@ -318,13 +311,13 @@ USERS: list[dict[str, str]] = load_users_from_db()
 
 def version_defaults(version: str) -> dict[str, Any]:
     if version not in VERSION_DEFAULTS:
-        raise ValueError("version must be 1.5 or 2.0")
+        raise ValueError("version must be wireguard")
     return VERSION_DEFAULTS[version]
 
 
 def normalize_server(data: dict[str, Any], existing: dict[str, Any] | None = None, server_conf: str | None = None) -> dict[str, Any]:
     existing = existing or {}
-    version = str(data.get("version", existing.get("version", "1.5")))
+    version = str(data.get("version", existing.get("version", "wireguard")))
     d = version_defaults(version)
     sid = str(data.get("id") or existing.get("id") or str(uuid.uuid4())[:8])
     subnet_default = existing.get("subnet") or "10.8.0.0/24"
@@ -439,8 +432,7 @@ def write_server_conf(server: dict[str, Any], content: str) -> dict[str, Any]:
 
 
 def show_command(server: dict[str, Any]) -> str:
-    tool = "awg" if server["version"] == "2.0" else "wg"
-    return f"{tool} show {q(server['interface'])}"
+    return f"wg show {q(server['interface'])}"
 
 
 def runtime_show(server: dict[str, Any]) -> dict[str, Any]:
@@ -480,7 +472,7 @@ def parse_interface_params(conf: str) -> dict[str, str]:
             continue
         if section == "interface" and "=" in line:
             k, v = line.split("=", 1)
-            ck = AWG_PARAM_CANON.get(k.strip().lower())
+            ck = CLIENT_INTERFACE_PARAM_CANON.get(k.strip().lower())
             if ck:
                 params[ck] = v.strip()
     return params
@@ -538,7 +530,7 @@ def build_detected_server(base: dict[str, Any], version: str, conf: str) -> dict
 
 
 def refresh_server_metadata_from_remote(server: dict[str, Any]) -> dict[str, Any]:
-    """Refresh subnet/listen port/DNS from the live AWG config without mutating remote."""
+    """Refresh subnet/listen port/DNS from the live WireGuard config without mutating remote."""
     conf = read_server_conf(server)
     if not conf:
         return server
@@ -595,15 +587,14 @@ def sync_server_peers(server_id: str) -> dict[str, Any]:
             added += 1
     persist()
     return {"ok": True, "added": added, "enriched": enriched}
-def detect_awg_servers(data: dict[str, Any]) -> list[dict[str, Any]]:
+def detect_wireguard_servers(data: dict[str, Any]) -> list[dict[str, Any]]:
     base = server_access_base(data)
     if not base.get("name") or not base.get("host"):
         raise ValueError("name and host are required")
 
     detected: list[dict[str, Any]] = []
     errors: dict[str, Any] = {}
-    # Prefer 2.0 first in the UI because that is the current target stack.
-    for version in ["2.0", "1.5"]:
+    for version in ["wireguard"]:
         d = version_defaults(version)
         probe = normalize_server({**base, "version": version, "container": d["container"], "interface": d["interface"], "config_path": d["config_path"]})
         r = cexec(probe, f"test -f {q(d['config_path'])} && cat {q(d['config_path'])}", timeout=25)
@@ -614,11 +605,11 @@ def detect_awg_servers(data: dict[str, Any]) -> list[dict[str, Any]]:
         detected.append(srv)
 
     if not detected:
-        raise RuntimeError("No supported AWG containers/configs detected", errors)
+        raise RuntimeError("No supported WireGuard containers/configs detected", errors)
 
     if len(detected) > 1:
         for srv in detected:
-            suffix = "awg 2.0" if srv["version"] == "2.0" else "legacy 1.5"
+            suffix = "wireguard"
             if suffix not in srv["name"].lower():
                 srv["name"] = f"{srv['name']} {suffix}"
             # Make IDs unique when a single host expands to both variants.
@@ -684,7 +675,7 @@ def server_peer_allowed_ips(address: str) -> str:
 def append_peer_block(conf: str, client: dict[str, Any]) -> str:
     conf = remove_peer_block(conf, client["pubkey"]).rstrip() + "\n\n"
     lines = [
-        f"# awg-web-gui name={client.get('name','')} id={client.get('id','')}",
+        f"# wg-web-gui name={client.get('name','')} id={client.get('id','')}",
         "[Peer]",
         f"PublicKey = {client['pubkey']}",
         f"AllowedIPs = {server_peer_allowed_ips(client['address'])}",
@@ -705,7 +696,7 @@ def public_from_private(privkey: str) -> str:
 
 
 def read_clients_table(server: dict[str, Any]) -> list[dict[str, Any]]:
-    cfg_dir = os.path.dirname(server.get("config_path") or "/opt/amnezia/awg/wg0.conf")
+    cfg_dir = os.path.dirname(server.get("config_path") or "/etc/wireguard/wg0.conf")
     r = cexec(server, f"test -f {q(cfg_dir + '/clientsTable')} && cat {q(cfg_dir + '/clientsTable')} || true")
     if not r["ok"] or not r["out"].strip():
         return []
@@ -774,8 +765,7 @@ def get_server_pubkey(server: dict[str, Any], conf: str | None = None) -> str:
     r = cexec(server, cmd)
     if r["ok"] and r["out"].strip():
         return r["out"].strip()
-    r = cexec(server, f"printf %s {q(private)} | awg pubkey")
-    return r["out"].strip() if r["ok"] else ""
+    return ""
 
 
 def get_server_params(server: dict[str, Any]) -> dict[str, Any]:
@@ -792,7 +782,7 @@ def build_client_conf(server: dict[str, Any], client: dict[str, Any], sp: dict[s
     ]
     if server.get("dns"):
         lines.append(f"DNS = {server['dns']}")
-    for key in AWG_PARAM_KEYS:
+    for key in CLIENT_INTERFACE_PARAM_KEYS:
         if key in params:
             lines.append(f"{key} = {params[key]}")
     lines += [
@@ -861,7 +851,7 @@ def apply_client_to_server(server: dict[str, Any], client: dict[str, Any], remov
 
 
 def parse_wg_dump(dump: str, now_ts: int | None = None, online_threshold: int = ONLINE_THRESHOLD) -> list[dict[str, Any]]:
-    """Parse `wg show <iface> dump` / `awg show <iface> dump` output.
+    """Parse `wg show <iface> dump` output.
 
     Returns peer rows only. First dump row is interface metadata.
     """
@@ -1002,10 +992,10 @@ def start_poller_once() -> None:
     if not ENABLE_POLLER or os.environ.get("PYTEST_CURRENT_TEST"):
         return
     # Avoid Flask reloader double-start and allow disabling in tests.
-    if getattr(app, "_awg_poller_started", False):
+    if getattr(app, "_wg_poller_started", False):
         return
-    app._awg_poller_started = True
-    threading.Thread(target=poll_loop, name="awg-stats-poller", daemon=True).start()
+    app._wg_poller_started = True
+    threading.Thread(target=poll_loop, name="wg-stats-poller", daemon=True).start()
 
 
 def login_required(f):
@@ -1057,7 +1047,7 @@ def add_server():
     data = request.json or {}
     try:
         if not data.get("version"):
-            servers = detect_awg_servers(data)
+            servers = detect_wireguard_servers(data)
             created = []
             sync_results = {}
             for s in servers:
@@ -1156,7 +1146,7 @@ def server_diagnose(sid):
     host_ip_forward = ssh_run(s, "sysctl -n net.ipv4.ip_forward", timeout=10)
     host_nat = ssh_run(s, "iptables -t nat -S POSTROUTING 2>/dev/null || nft list ruleset 2>/dev/null || true", timeout=15)
     container_iface = cexec(s, f"ip addr show {q(s['interface'])}", timeout=10)
-    dump_result = cexec(s, f"{('awg' if s['version'] == '2.0' else 'wg')} show {q(s['interface'])} dump", timeout=15)
+    dump_result = cexec(s, f"wg show {q(s['interface'])} dump", timeout=15)
     peers = parse_wg_dump(dump_result.get("out", "")) if dump_result.get("ok") else []
 
     subnet = str(s.get("subnet") or "")
@@ -1394,7 +1384,7 @@ def import_fleet():
     results = []
     for item in items:
         try:
-            detected = detect_awg_servers(item)
+            detected = detect_wireguard_servers(item)
             created = []
             sync_results = {}
             for srv in detected:
@@ -1569,7 +1559,7 @@ def client_config(cid):
         return jsonify({"ok": False, "error": "server not found"}), 404
     cfg = build_client_conf(s, client, get_server_params(s))
     safe_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", client.get("name", "client"))
-    return cfg, 200, {"Content-Type": "text/plain; charset=utf-8", "Content-Disposition": f"attachment; filename=awg_{safe_name}.conf"}
+    return cfg, 200, {"Content-Type": "text/plain; charset=utf-8", "Content-Disposition": f"attachment; filename=wg_{safe_name}.conf"}
 
 
 @app.route("/api/clients/<cid>/qr.png")

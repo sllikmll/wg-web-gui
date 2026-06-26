@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AmneziaWG Web GUI</title>
+  <title>WireGuard Web GUI</title>
   <style>
     :root { color-scheme: light; --bg:#f5f7fb; --card:#fff; --text:#172033; --muted:#64748b; --line:#e2e8f0; --blue:#2563eb; --red:#dc2626; --green:#16a34a; --amber:#d97706; --purple:#7c3aed; }
     * { box-sizing: border-box; }
@@ -48,8 +48,8 @@
 <body>
 <div class="container">
   <section id="login" class="card hidden">
-    <h1>AmneziaWG Web GUI</h1>
-    <p class="muted">Вход в локальную панель управления AWG-серверами.</p>
+    <h1>WireGuard Web GUI</h1>
+    <p class="muted">Вход в локальную панель управления WireGuard-серверами.</p>
     <form id="loginForm" class="grid" style="grid-template-columns:1fr">
       <input name="username" placeholder="Логин" value="admin" autocomplete="username" required>
       <input name="password" type="password" placeholder="Пароль" value="admin" autocomplete="current-password" required>
@@ -61,8 +61,8 @@
   <main id="app" class="hidden">
     <div class="top">
       <div>
-        <h1 style="margin:0">AmneziaWG Web GUI</h1>
-        <div class="muted">Управление серверами, клиентами, диагностикой, backup и импортом AWG 1.5 / 2.0</div>
+        <h1 style="margin:0">WireGuard Web GUI</h1>
+        <div class="muted">Управление серверами, клиентами, диагностикой, backup и импортом WireGuard / wg-easy</div>
       </div>
       <div class="toolbar">
         <button class="secondary" onclick="openModal('fleetModal')">Fleet import</button>
@@ -85,7 +85,7 @@
         <label style="display:flex;align-items:center;gap:8px"><input name="auto_sync" type="checkbox" checked> Auto-sync peers после добавления</label>
         <button type="submit">Добавить сервер</button>
       </form>
-      <div class="hint">Версия AWG, контейнер, interface, config path, UDP port, subnet и DNS определяются автоматически из remote config. Удаление сервера удаляет его только из базы панели.</div>
+      <div class="hint">Контейнер wg-easy, interface, config path, UDP port, subnet и DNS определяются автоматически из remote config. Удаление сервера удаляет его только из базы панели.</div>
       <div id="serversList"></div>
     </section>
 
@@ -100,7 +100,7 @@
         <button type="submit">Добавить клиента на сервер</button>
         <button type="button" class="secondary" onclick="openImportConfig()">Импорт .conf</button>
       </form>
-      <div class="hint">При добавлении делается backup remote config, запись peer в config и restart только AWG-контейнера.</div>
+      <div class="hint">При добавлении делается backup remote config, запись peer в config и restart только WireGuard-контейнера.</div>
       <div id="clientsList"></div>
     </section>
 
@@ -191,7 +191,7 @@
 
 <div id="fleetModal" class="modal"><div class="card">
   <h3>Fleet import</h3>
-  <p class="hint">Вставьте JSON array. Для каждого host приложение само найдёт AWG 1.5/2.0, добавит серверы и выполнит sync peers.</p>
+  <p class="hint">Вставьте JSON array. Для каждого host приложение само найдёт WireGuard/wg-easy, добавит серверы и выполнит sync peers.</p>
   <form id="fleetForm" class="grid" style="grid-template-columns:1fr">
     <textarea name="servers" placeholder='[{"name":"admrus","host":"138.16.227.27","ssh_user":"root","ssh_key":"/ssh/id_ed25519"}]' required></textarea>
     <button type="submit">Импортировать флотилию</button>
@@ -247,7 +247,7 @@ async function loadAll(){ await loadServers(); await loadClients(); await loadEv
 async function loadServers(){
   currentServers = await api('GET','/servers');
   const arr = Object.values(currentServers);
-  const opts = arr.length ? arr.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.version)})</option>`).join('') : '<option disabled>Нет серверов</option>';
+  const opts = arr.length ? arr.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.version || "wireguard")})</option>`).join('') : '<option disabled>Нет серверов</option>';
   document.getElementById('clientServer').innerHTML = opts;
   document.getElementById('importConfigServer').innerHTML = opts;
   document.getElementById('serversList').innerHTML = arr.length ? `<table><tr><th>Название</th><th>Host</th><th>Версия</th><th>Контейнер</th><th>Subnet/Port</th><th>Auth</th><th>Статус</th><th></th></tr>${arr.map(s=>`<tr>
@@ -293,7 +293,7 @@ async function pollServer(id){ try { const j=await api('POST','/servers/'+id+'/p
 async function syncServer(id){ try { const j=await api('POST','/servers/'+id+'/sync'); toast(`Sync OK: peers=${j.peers}, added=${j.added}, private keys=${j.enriched_private_keys}`); await loadClients(); await loadEvents(); } catch(e){ toast('Sync failed: '+e.message,true); } }
 async function enrichKeys(id){ try { const j=await api('POST','/servers/'+id+'/enrich-keys'); toast(`Enrich OK: ${j.enriched} из ${j.known_private_keys}`); await loadClients(); await loadEvents(); } catch(e){ toast('Enrich failed: '+e.message,true); } }
 async function delServer(id){ if(!confirm('Удалить сервер только из базы панели? Реальный сервер не трогаем.')) return; try{await api('DELETE','/servers/'+id); toast('Сервер удалён из панели'); await loadAll();}catch(e){toast(e.message,true);} }
-async function delClient(id){ if(!confirm('Удалить клиента с сервера и из панели? Будет backup config и restart AWG-контейнера.')) return; try{await api('DELETE','/clients/'+id); toast('Клиент удалён'); await loadAll();}catch(e){toast('Не удалил клиента: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
+async function delClient(id){ if(!confirm('Удалить клиента с сервера и из панели? Будет backup config и restart WireGuard-контейнера.')) return; try{await api('DELETE','/clients/'+id); toast('Клиент удалён'); await loadAll();}catch(e){toast('Не удалил клиента: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
 async function disableClient(id){ if(!confirm('Отключить клиента? Peer будет убран из remote config, запись останется в SQLite.')) return; try{await api('POST','/clients/'+id+'/disable'); toast('Клиент отключён'); await loadAll();}catch(e){toast('Disable failed: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
 async function enableClient(id){ if(!confirm('Включить клиента обратно? Peer будет записан в remote config.')) return; try{await api('POST','/clients/'+id+'/enable'); toast('Клиент включён'); await loadAll();}catch(e){toast('Enable failed: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
 function showQr(id){ window.open(API + '/clients/' + encodeURIComponent(id) + '/qr.png', '_blank'); }

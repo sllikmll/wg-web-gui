@@ -8,8 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def load_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("AWG_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AWG_ENABLE_POLLER", "0")
+    monkeypatch.setenv("WG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("WG_ENABLE_POLLER", "0")
     import app
     return importlib.reload(app)
 
@@ -102,11 +102,11 @@ ListenPort = 9727
 DNS = 9.9.9.9
 """
 
-    detected = app.build_detected_server(base, "2.0", conf)
+    detected = app.build_detected_server(base, "wireguard", conf)
 
-    assert detected["version"] == "2.0"
-    assert detected["container"] == "amnezia-awg2"
-    assert detected["interface"] == "awg0"
+    assert detected["version"] == "wireguard"
+    assert detected["container"] == "wg-easy"
+    assert detected["interface"] == "wg0"
     assert detected["wg_port"] == 9727
     assert detected["subnet"] == "10.9.5.0/24"
     assert detected["dns"] == "9.9.9.9"
@@ -118,7 +118,7 @@ def test_detected_server_without_dns_keeps_safe_default(tmp_path, monkeypatch):
     base = {"name": "admrus", "host": "1.2.3.4"}
     conf = "[Interface]\nAddress = 10.8.7.1/24\nListenPort = 8727\n"
 
-    detected = app.build_detected_server(base, "1.5", conf)
+    detected = app.build_detected_server(base, "wireguard", conf)
 
     assert detected["subnet"] == "10.8.7.0/24"
     assert detected["wg_port"] == 8727

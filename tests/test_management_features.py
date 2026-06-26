@@ -6,8 +6,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
 def load_app(tmp_path, monkeypatch):
-    monkeypatch.setenv("AWG_DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("AWG_ENABLE_POLLER", "0")
+    monkeypatch.setenv("WG_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("WG_ENABLE_POLLER", "0")
     import app
     return importlib.reload(app)
 
