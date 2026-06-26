@@ -39,6 +39,9 @@ git clone https://github.com/sllikmll/wg-web-gui.git
 cd wg-web-gui
 cp docker-compose.example.yml docker-compose.yml
 mkdir -p data ssh
+# Контейнер работает под UID 10001, поэтому bind-mounted SQLite dir должен быть writable.
+# Если запускаешь от обычного пользователя, может понадобиться sudo.
+chown 10001:100 data
 ```
 
 Положи SSH-ключ для доступа к VPN-серверам в `./ssh/`:
