@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AmneziaWG Web GUI</title>
+  <style>
+    :root { color-scheme: light; --bg:#f5f7fb; --card:#fff; --text:#172033; --muted:#64748b; --line:#e2e8f0; --blue:#2563eb; --red:#dc2626; --green:#16a34a; --amber:#d97706; --purple:#7c3aed; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:16px; margin-bottom:16px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin:14px 0; box-shadow:0 8px 24px rgba(15,23,42,.05); }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+    input, select, button, textarea { font:inherit; padding:9px 11px; border-radius:9px; border:1px solid #cbd5e1; }
+    textarea { min-height: 160px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    button { border:0; background:var(--blue); color:white; cursor:pointer; font-weight:600; }
+    button:hover { filter:brightness(.95); }
+    button.secondary { background:#64748b; }
+    button.danger { background:var(--red); }
+    button.warnbtn { background:var(--amber); }
+    button.purple { background:var(--purple); }
+    button.small { padding:6px 9px; font-size:13px; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th, td { padding:9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { color:var(--muted); font-size:13px; }
+    code { background:#f1f5f9; padding:2px 5px; border-radius:5px; }
+    pre { overflow:auto; background:#0f172a; color:#e2e8f0; border-radius:12px; padding:12px; max-height:420px; }
+    .badge { display:inline-block; background:#e0e7ff; color:#3730a3; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:700; }
+    .badge.gray { background:#e2e8f0; color:#334155; }
+    .badge.red { background:#fee2e2; color:#991b1b; }
+    .badge.green { background:#dcfce7; color:#166534; }
+    .ok { color:var(--green); font-weight:700; }
+    .bad { color:var(--red); font-weight:700; }
+    .warn { color:var(--amber); font-weight:700; }
+    .muted { color:var(--muted); }
+    .hidden { display:none !important; }
+    #login { max-width: 390px; margin: 9vh auto; }
+    #toast { position:fixed; right:20px; bottom:20px; max-width:680px; white-space:pre-wrap; z-index:10; }
+    .modal { position:fixed; inset:0; background:rgba(15,23,42,.45); display:none; align-items:center; justify-content:center; padding:16px; z-index:20; }
+    .modal.active { display:flex; }
+    .modal .card { width:min(860px, 96vw); max-height:90vh; overflow:auto; }
+    .row-actions { display:flex; gap:6px; flex-wrap:wrap; }
+    .hint { font-size:13px; color:var(--muted); margin-top:6px; }
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <section id="login" class="card hidden">
+    <h1>AmneziaWG Web GUI</h1>
+    <p class="muted">Вход в локальную панель управления AWG-серверами.</p>
+    <form id="loginForm" class="grid" style="grid-template-columns:1fr">
+      <input name="username" placeholder="Логин" value="admin" autocomplete="username" required>
+      <input name="password" type="password" placeholder="Пароль" value="admin" autocomplete="current-password" required>
+      <button type="submit">Войти</button>
+    </form>
+    <div class="hint">Dev default: admin/admin. Для production поменять обязательно.</div>
+  </section>
+
+  <main id="app" class="hidden">
+    <div class="top">
+      <div>
+        <h1 style="margin:0">AmneziaWG Web GUI</h1>
+        <div class="muted">Управление серверами, клиентами, диагностикой, backup и импортом AWG 1.5 / 2.0</div>
+      </div>
+      <div class="toolbar">
+        <button class="secondary" onclick="openModal('fleetModal')">Fleet import</button>
+        <button class="secondary" onclick="openModal('passwordModal')">Сменить пароль</button>
+        <button class="secondary" onclick="logout()">Выйти</button>
+      </div>
+    </div>
+
+    <section class="card">
+      <h2>Серверы</h2>
+      <form id="serverForm" class="grid">
+        <input name="name" placeholder="Название, например admrus" required>
+        <input name="host" placeholder="IP / hostname" required>
+        <input name="ssh_user" placeholder="SSH user" value="root">
+        <input name="ssh_port" type="number" placeholder="SSH port" value="22">
+        <input name="ssh_key" placeholder="Путь к SSH ключу">
+        <input name="ssh_password" type="password" placeholder="SSH пароль вместо ключа">
+        <input name="endpoint" placeholder="Endpoint для клиента, если отличается от host">
+        <label style="display:flex;align-items:center;gap:8px"><input name="validate" type="checkbox" checked> Проверить SSH/контейнер</label>
+        <label style="display:flex;align-items:center;gap:8px"><input name="auto_sync" type="checkbox" checked> Auto-sync peers после добавления</label>
+        <button type="submit">Добавить сервер</button>
+      </form>
+      <div class="hint">Версия AWG, контейнер, interface, config path, UDP port, subnet и DNS определяются автоматически из remote config. Удаление сервера удаляет его только из базы панели.</div>
+      <div id="serversList"></div>
+    </section>
+
+    <section class="card">
+      <h2>Клиенты</h2>
+      <form id="clientForm" class="grid">
+        <select id="clientServer" name="server_id" required></select>
+        <input name="name" placeholder="Имя клиента" required>
+        <input name="address" placeholder="IP клиента, пусто = авто">
+        <input name="allowed_ips" placeholder="AllowedIPs в клиентском конфиге" value="0.0.0.0/0, ::/0">
+        <input name="preshared_key" placeholder="PSK, пусто = авто">
+        <button type="submit">Добавить клиента на сервер</button>
+        <button type="button" class="secondary" onclick="openImportConfig()">Импорт .conf</button>
+      </form>
+      <div class="hint">При добавлении делается backup remote config, запись peer в config и restart только AWG-контейнера.</div>
+      <div id="clientsList"></div>
+    </section>
+
+    <section class="card">
+      <div class="top" style="margin-bottom:0">
+        <div>
+          <h2 style="margin:0">Мониторинг и трафик</h2>
+          <div class="muted">Online, last handshake, endpoint, RX/TX и накопительный трафик по клиентам.</div>
+        </div>
+        <button class="secondary" onclick="pollNow()">Обновить сейчас</button>
+      </div>
+      <div id="statsList"></div>
+    </section>
+
+    <section class="card">
+      <div class="top" style="margin-bottom:0">
+        <div>
+          <h2 style="margin:0">Журнал событий</h2>
+          <div class="muted">Sync, polling, backup restore, import и ошибки.</div>
+        </div>
+        <button class="secondary" onclick="loadEvents()">Обновить журнал</button>
+      </div>
+      <div id="eventsList"></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" class="card hidden"></div>
+
+<div id="editServerModal" class="modal"><div class="card">
+  <h3>Редактировать сервер</h3>
+  <form id="editServerForm" class="grid">
+    <input type="hidden" name="id">
+    <input name="name" placeholder="Название" required>
+    <input name="host" placeholder="IP / hostname" required>
+    <input name="ssh_user" placeholder="SSH user">
+    <input name="ssh_port" type="number" placeholder="SSH port">
+    <input name="ssh_key" placeholder="Путь к SSH ключу">
+    <input name="ssh_password" type="password" placeholder="Новый SSH пароль; пусто = не менять">
+    <input name="wg_port" type="number" placeholder="UDP порт">
+    <input name="endpoint" placeholder="Endpoint">
+    <input name="subnet" placeholder="VPN subnet">
+    <input name="dns" placeholder="DNS">
+    <input name="container" placeholder="Имя Docker-контейнера">
+    <input name="interface" placeholder="WireGuard interface">
+    <input name="config_path" placeholder="Путь к config внутри контейнера">
+    <button type="submit">Сохранить</button>
+    <button type="button" class="secondary" onclick="closeModal('editServerModal')">Отмена</button>
+  </form>
+</div></div>
+
+<div id="editClientModal" class="modal"><div class="card">
+  <h3>Редактировать клиента</h3>
+  <form id="editClientForm" class="grid">
+    <input type="hidden" name="id">
+    <input name="name" placeholder="Имя" required>
+    <input name="address" placeholder="IP клиента">
+    <input name="allowed_ips" placeholder="AllowedIPs в клиентском конфиге">
+    <input name="preshared_key" placeholder="Preshared key">
+    <input name="privkey" placeholder="Private key клиента; пусто = не менять">
+    <button type="submit">Сохранить</button>
+    <button type="button" class="secondary" onclick="closeModal('editClientModal')">Отмена</button>
+  </form>
+</div></div>
+
+<div id="diagnoseModal" class="modal"><div class="card">
+  <h3>Диагностика сервера</h3>
+  <div id="diagnoseContent" class="muted">Нет данных</div>
+  <button class="secondary" onclick="closeModal('diagnoseModal')">Закрыть</button>
+</div></div>
+
+<div id="backupsModal" class="modal"><div class="card">
+  <h3>Backups remote config</h3>
+  <div id="backupsContent" class="muted">Нет данных</div>
+  <button class="secondary" onclick="closeModal('backupsModal')">Закрыть</button>
+</div></div>
+
+<div id="importConfigModal" class="modal"><div class="card">
+  <h3>Импорт client .conf</h3>
+  <form id="importConfigForm" class="grid" style="grid-template-columns:1fr">
+    <select name="server_id" id="importConfigServer" required></select>
+    <input name="name" placeholder="Имя клиента, если создаём нового">
+    <textarea name="config" placeholder="Вставьте client .conf сюда" required></textarea>
+    <button type="submit">Импортировать</button>
+    <button type="button" class="secondary" onclick="closeModal('importConfigModal')">Отмена</button>
+  </form>
+</div></div>
+
+<div id="fleetModal" class="modal"><div class="card">
+  <h3>Fleet import</h3>
+  <p class="hint">Вставьте JSON array. Для каждого host приложение само найдёт AWG 1.5/2.0, добавит серверы и выполнит sync peers.</p>
+  <form id="fleetForm" class="grid" style="grid-template-columns:1fr">
+    <textarea name="servers" placeholder='[{"name":"admrus","host":"138.16.227.27","ssh_user":"root","ssh_key":"/ssh/id_ed25519"}]' required></textarea>
+    <button type="submit">Импортировать флотилию</button>
+    <button type="button" class="secondary" onclick="closeModal('fleetModal')">Отмена</button>
+  </form>
+</div></div>
+
+<div id="passwordModal" class="modal"><div class="card">
+  <h3>Сменить пароль</h3>
+  <form id="passwordForm" class="grid" style="grid-template-columns:1fr">
+    <input name="current_password" type="password" placeholder="Текущий пароль" required>
+    <input name="new_password" type="password" placeholder="Новый пароль, минимум 8 символов" required>
+    <button type="submit">Сменить пароль</button>
+    <button type="button" class="secondary" onclick="closeModal('passwordModal')">Отмена</button>
+  </form>
+</div></div>
+
+<script>
+const API = '/api';
+let currentServers = {};
+let currentClients = [];
+
+function esc(s) { return String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c])); }
+function fmtBytes(n) { n=Number(n||0); const u=['B','KB','MB','GB','TB']; let i=0; while(n>=1024 && i<u.length-1){n/=1024;i++;} return (i? n.toFixed(1): String(n))+' '+u[i]; }
+function fmtTime(ts) { if(!ts) return '-'; const d=new Date(String(ts).replace(' ','T')); return isNaN(d) ? String(ts) : d.toLocaleString(); }
+function toast(msg, isErr=false) { const t=document.getElementById('toast'); t.textContent=msg; t.classList.remove('hidden'); t.style.borderColor=isErr?'#fecaca':'#bbf7d0'; clearTimeout(window.__toast); window.__toast=setTimeout(()=>t.classList.add('hidden'), isErr?14000:6000); }
+async function api(method, path, body) {
+  const opts = {method, credentials:'same-origin', headers:{}};
+  if (body !== undefined) { opts.headers['Content-Type']='application/json'; opts.body=JSON.stringify(body); }
+  const r = await fetch(API + path, opts);
+  const ct = r.headers.get('content-type') || '';
+  const data = ct.includes('application/json') ? await r.json() : await r.text();
+  if (!r.ok) { const e = new Error(typeof data === 'string' ? data : (data.error || JSON.stringify(data))); e.data=data; e.status=r.status; throw e; }
+  return data;
+}
+function openModal(id) { document.getElementById(id).classList.add('active'); }
+function closeModal(id) { document.getElementById(id).classList.remove('active'); editingId = null; }
+
+async function refreshAuth() {
+  const me = await api('GET','/me');
+  document.getElementById('login').classList.toggle('hidden', me.logged_in);
+  document.getElementById('app').classList.toggle('hidden', !me.logged_in);
+  if (me.logged_in) await loadAll();
+}
+document.getElementById('loginForm').addEventListener('submit', async e => {
+  e.preventDefault(); const fd = new FormData(e.target);
+  try { await api('POST','/login',{username:fd.get('username'), password:fd.get('password')}); toast('Вход выполнен'); await refreshAuth(); }
+  catch(err) { toast('Ошибка входа: ' + err.message, true); }
+});
+async function logout(){ await api('POST','/logout'); await refreshAuth(); }
+
+async function loadAll(){ await loadServers(); await loadClients(); await loadEvents(); }
+async function loadServers(){
+  currentServers = await api('GET','/servers');
+  const arr = Object.values(currentServers);
+  const opts = arr.length ? arr.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} (${esc(s.version)})</option>`).join('') : '<option disabled>Нет серверов</option>';
+  document.getElementById('clientServer').innerHTML = opts;
+  document.getElementById('importConfigServer').innerHTML = opts;
+  document.getElementById('serversList').innerHTML = arr.length ? `<table><tr><th>Название</th><th>Host</th><th>Версия</th><th>Контейнер</th><th>Subnet/Port</th><th>Auth</th><th>Статус</th><th></th></tr>${arr.map(s=>`<tr>
+    <td>${esc(s.name)}</td><td>${esc(s.host)}</td><td><span class="badge">${esc(s.version)}</span></td><td><code>${esc(s.container)}/${esc(s.interface)}</code></td><td><code>${esc(s.subnet)}</code><br>${esc(s.wg_port)}</td><td>${s.has_ssh_password?'<span class="badge gray">password</span>':'<span class="badge gray">key</span>'}</td><td id="status_${esc(s.id)}" class="muted">...</td>
+    <td class="row-actions"><button class="small" onclick="editServer('${esc(s.id)}')">Edit</button><button class="small" onclick="health('${esc(s.id)}')">Health</button><button class="small purple" onclick="diagnose('${esc(s.id)}')">Diagnose</button><button class="small" onclick="syncServer('${esc(s.id)}')">Sync</button><button class="small" onclick="enrichKeys('${esc(s.id)}')">Enrich keys</button><button class="small" onclick="pollServer('${esc(s.id)}')">Poll</button><button class="small" onclick="showBackups('${esc(s.id)}')">Backups</button><button class="small danger" onclick="delServer('${esc(s.id)}')">Del</button></td></tr>`).join('')}</table>` : '<p class="muted">Серверов пока нет.</p>';
+  arr.forEach(s=>health(s.id, true));
+}
+async function health(id, silent=false){
+  const el=document.getElementById('status_'+id); if(el) el.textContent='checking...';
+  try { const j=await api('GET','/servers/'+id+'/health'); if(el){ el.textContent=j.ok?'online':'fail: '+j.stage; el.className=j.ok?'ok':'bad'; } if(!silent) toast(JSON.stringify(j,null,2), !j.ok); }
+  catch(e){ if(el){el.textContent='error'; el.className='bad';} if(!silent) toast(e.message,true); }
+}
+async function diagnose(id){
+  try { const j=await api('GET','/servers/'+id+'/diagnose');
+    const checks=j.checks||{};
+    document.getElementById('diagnoseContent').innerHTML = `<p>${j.ok?'<span class="ok">✅ OK</span>':'<span class="bad">❌ Есть проблемы</span>'}</p>
+      <p><b>Issues:</b> ${j.issues && j.issues.length ? esc(j.issues.join('; ')) : 'нет'}</p>
+      <table><tr><th>Проверка</th><th>Статус</th><th>Детали</th></tr>
+      <tr><td>Health</td><td>${checks.ssh_container_config_runtime?.ok?'✅':'❌'}</td><td>${esc(checks.ssh_container_config_runtime?.stage||'')}</td></tr>
+      <tr><td>ip_forward</td><td>${checks.host_ip_forward?.ok?'✅':'❌'}</td><td><code>${esc(checks.host_ip_forward?.raw?.out||checks.host_ip_forward?.raw?.err||'')}</code></td></tr>
+      <tr><td>NAT</td><td>${checks.host_nat?.ok?'✅':'⚠️'}</td><td>mentions subnet: ${checks.host_nat?.mentions_subnet?'yes':'no'}</td></tr>
+      <tr><td>Interface</td><td>${checks.container_interface?.ok?'✅':'❌'}</td><td></td></tr>
+      <tr><td>Runtime peers</td><td>${checks.runtime_dump?.ok?'✅':'❌'}</td><td>${esc(checks.runtime_dump?.peers||0)} peers</td></tr></table>
+      <pre>${esc(JSON.stringify(j,null,2))}</pre>`;
+    openModal('diagnoseModal');
+  } catch(e){ toast('Diagnose failed: '+e.message,true); }
+}
+async function loadClients(){
+  currentClients = await api('GET','/clients');
+  document.getElementById('clientsList').innerHTML = currentClients.length ? `<table><tr><th>Имя</th><th>Сервер</th><th>Address</th><th>Public key</th><th>Private key</th><th>Status</th><th>Handshake</th><th>Traffic</th><th></th></tr>${currentClients.map(c=>{
+    const st=c.stats||{}; const online=st.online ? '<span class="ok">online</span>' : '<span class="bad">offline</span>'; const traffic=`${fmtBytes(st.total_rx)} ↓ / ${fmtBytes(st.total_tx)} ↑`;
+    const disabled=c.disabled?'<span class="badge red">disabled</span>':(st.public_key?online:'-');
+    return `<tr><td>${esc(c.name)}</td><td>${esc(c.server_name)}</td><td><code>${esc(c.address||'-')}</code></td><td><code>${esc(c.pubkey ? c.pubkey.slice(0,18)+'...' : '-')}</code></td><td>${c.has_privkey?'<span class="badge green">known</span>':'<span class="badge red">missing</span>'}</td><td>${disabled}</td><td>${fmtTime(st.last_seen_at)}</td><td>${traffic}</td>
+    <td class="row-actions">${c.has_privkey?`<a href="${API}/clients/${esc(c.id)}/config" target="_blank"><button class="small">Config</button></a><button class="small" onclick="showQr('${esc(c.id)}')">QR</button>`:'<span class="muted" title="Импортирован с сервера, приватный ключ неизвестен">нет private key</span>'}<button class="small" onclick="editClient('${esc(c.id)}')">Edit</button>${c.disabled?`<button class="small" onclick="enableClient('${esc(c.id)}')">Enable</button>`:`<button class="small warnbtn" onclick="disableClient('${esc(c.id)}')">Disable</button>`}<button class="small danger" onclick="delClient('${esc(c.id)}')">Del</button></td></tr>`}).join('')}</table>` : '<p class="muted">Клиентов пока нет.</p>';
+  renderStats();
+}
+function renderStats(){
+  const rows = currentClients.map(c => ({...c, st:c.stats||{}})).filter(x => x.st.public_key);
+  document.getElementById('statsList').innerHTML = rows.length ? `<table><tr><th>Клиент</th><th>Сервер</th><th>Статус</th><th>Endpoint</th><th>Last handshake</th><th>Session RX/TX</th><th>Total RX/TX</th><th>Updated</th></tr>${rows.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.server_name)}</td><td>${x.disabled?'<span class="warn">disabled</span>':(x.st.online?'<span class="ok">🟢 online</span>':'<span class="bad">🔴 offline</span>')}</td><td><code>${esc(x.st.endpoint||'-')}</code></td><td>${fmtTime(x.st.last_seen_at)}</td><td>${fmtBytes(x.st.transfer_rx)} ↓ / ${fmtBytes(x.st.transfer_tx)} ↑</td><td><b>${fmtBytes(x.st.total_rx)} ↓ / ${fmtBytes(x.st.total_tx)} ↑</b></td><td>${fmtTime(x.st.updated_at)}</td></tr>`).join('')}</table>` : '<p class="muted">Статистики пока нет. Нажмите Poll на сервере или дождитесь фонового опроса.</p>';
+}
+async function pollNow(){ try { const j=await api('POST','/poll'); toast('Poll OK: '+JSON.stringify(j.results)); await loadClients(); await loadEvents(); } catch(e){ toast('Poll failed: '+e.message,true); } }
+async function pollServer(id){ try { const j=await api('POST','/servers/'+id+'/poll'); toast('Poll server: '+JSON.stringify(j)); await loadClients(); await loadEvents(); } catch(e){ toast('Poll failed: '+e.message,true); } }
+async function syncServer(id){ try { const j=await api('POST','/servers/'+id+'/sync'); toast(`Sync OK: peers=${j.peers}, added=${j.added}, private keys=${j.enriched_private_keys}`); await loadClients(); await loadEvents(); } catch(e){ toast('Sync failed: '+e.message,true); } }
+async function enrichKeys(id){ try { const j=await api('POST','/servers/'+id+'/enrich-keys'); toast(`Enrich OK: ${j.enriched} из ${j.known_private_keys}`); await loadClients(); await loadEvents(); } catch(e){ toast('Enrich failed: '+e.message,true); } }
+async function delServer(id){ if(!confirm('Удалить сервер только из базы панели? Реальный сервер не трогаем.')) return; try{await api('DELETE','/servers/'+id); toast('Сервер удалён из панели'); await loadAll();}catch(e){toast(e.message,true);} }
+async function delClient(id){ if(!confirm('Удалить клиента с сервера и из панели? Будет backup config и restart AWG-контейнера.')) return; try{await api('DELETE','/clients/'+id); toast('Клиент удалён'); await loadAll();}catch(e){toast('Не удалил клиента: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
+async function disableClient(id){ if(!confirm('Отключить клиента? Peer будет убран из remote config, запись останется в SQLite.')) return; try{await api('POST','/clients/'+id+'/disable'); toast('Клиент отключён'); await loadAll();}catch(e){toast('Disable failed: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
+async function enableClient(id){ if(!confirm('Включить клиента обратно? Peer будет записан в remote config.')) return; try{await api('POST','/clients/'+id+'/enable'); toast('Клиент включён'); await loadAll();}catch(e){toast('Enable failed: '+e.message+'\n'+JSON.stringify(e.data||{},null,2),true);} }
+function showQr(id){ window.open(API + '/clients/' + encodeURIComponent(id) + '/qr.png', '_blank'); }
+let editingId = null;
+
+function editServer(id) {
+  const s = currentServers[id]; if (!s) return; editingId = id; const f = document.getElementById('editServerForm'); f.elements['id'].value = s.id;
+  ['name','host','ssh_user','ssh_port','ssh_key','wg_port','endpoint','subnet','dns','container','interface','config_path'].forEach(k => { if (f.elements[k]) f.elements[k].value = s[k] || ''; });
+  f.elements['ssh_password'].value = ''; openModal('editServerModal');
+}
+function editClient(id) {
+  const c = currentClients.find(x => x.id === id); if (!c) return; editingId = id; const f = document.getElementById('editClientForm'); f.elements['id'].value = c.id;
+  ['name','address','allowed_ips'].forEach(k => f.elements[k].value = c[k] || ''); f.elements['preshared_key'].value=''; f.elements['privkey'].value=''; openModal('editClientModal');
+}
+
+document.getElementById('serverForm').addEventListener('submit', async e=>{
+  e.preventDefault(); const fd=new FormData(e.target); const body={}; for(const [k,v] of fd.entries()) body[k]=v; body.validate = fd.get('validate') === 'on'; body.auto_sync = fd.get('auto_sync') === 'on';
+  try { const j=await api('POST','/servers',body); const sync=j.sync?`\nsync=${JSON.stringify(j.sync)}`:''; toast(j.servers && j.servers.length > 1 ? `Добавлено серверов: ${j.servers.map(s=>s.name).join(', ')}${sync}` : 'Сервер добавлен: '+j.server.name+sync); e.target.reset(); await loadAll(); }
+  catch(err){ toast('Не добавил сервер: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+document.getElementById('clientForm').addEventListener('submit', async e=>{
+  e.preventDefault(); const fd=new FormData(e.target); const body={}; for(const [k,v] of fd.entries()) body[k]=v;
+  try { const j=await api('POST','/clients',body); toast('Клиент добавлен: '+j.client.name); e.target.reset(); await loadAll(); }
+  catch(err){ toast('Не добавил клиента: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+document.getElementById('editServerForm').addEventListener('submit', async e => {
+  e.preventDefault(); const fd = new FormData(e.target); const body = {};
+  ['name','host','ssh_user','ssh_port','ssh_key','ssh_password','wg_port','endpoint','subnet','dns','container','interface','config_path'].forEach(k => { if (fd.has(k) && (k !== 'ssh_password' || fd.get(k))) body[k] = fd.get(k); });
+  try { const j = await api('PUT','/servers/'+editingId, body); toast('Сервер обновлён: '+j.server.name); closeModal('editServerModal'); await loadAll(); }
+  catch(err){ toast('Не обновил сервер: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+document.getElementById('editClientForm').addEventListener('submit', async e => {
+  e.preventDefault(); const fd = new FormData(e.target); const body = {};
+  ['name','address','allowed_ips'].forEach(k => body[k] = fd.get(k)); ['preshared_key','privkey'].forEach(k => { if(fd.get(k)) body[k] = fd.get(k); });
+  try { const j = await api('PUT','/clients/'+editingId, body); toast('Клиент обновлён: '+j.client.name); closeModal('editClientModal'); await loadAll(); }
+  catch(err){ toast('Не обновил клиента: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+function openImportConfig(){ openModal('importConfigModal'); }
+document.getElementById('importConfigForm').addEventListener('submit', async e=>{
+  e.preventDefault(); const fd=new FormData(e.target); try{ const j=await api('POST','/clients/import-config',{server_id:fd.get('server_id'), name:fd.get('name'), config:fd.get('config')}); toast('Config import: '+j.action); closeModal('importConfigModal'); e.target.reset(); await loadAll(); }catch(err){ toast('Import failed: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+document.getElementById('fleetForm').addEventListener('submit', async e=>{
+  e.preventDefault(); const fd=new FormData(e.target); try{ const servers=JSON.parse(fd.get('servers')); const j=await api('POST','/fleet/import',{servers}); toast('Fleet import done:\n'+JSON.stringify(j.results,null,2), !j.ok); closeModal('fleetModal'); await loadAll(); }catch(err){ toast('Fleet import failed: '+err.message+'\n'+JSON.stringify(err.data||{},null,2), true); }
+});
+document.getElementById('passwordForm').addEventListener('submit', async e=>{
+  e.preventDefault(); const fd=new FormData(e.target); try{ await api('PUT','/password',{current_password:fd.get('current_password'), new_password:fd.get('new_password')}); toast('Пароль изменён'); closeModal('passwordModal'); e.target.reset(); }catch(err){ toast('Password change failed: '+err.message, true); }
+});
+async function showBackups(id){
+  try{ const j=await api('GET','/servers/'+id+'/backups'); document.getElementById('backupsContent').innerHTML = j.backups.length ? `<table><tr><th>Backup</th><th></th></tr>${j.backups.map(b=>`<tr><td><code>${esc(b)}</code></td><td><button class="small danger" onclick="restoreBackup('${esc(id)}','${esc(b)}')">Restore</button></td></tr>`).join('')}</table>` : '<p class="muted">Backups не найдены.</p>'; openModal('backupsModal'); }catch(e){ toast('Backups failed: '+e.message,true); }
+}
+async function restoreBackup(id, backup){ if(!confirm('Восстановить backup remote config? Будет создан backup текущего конфига и restart контейнера.')) return; try{ const j=await api('POST','/servers/'+id+'/backups/restore',{backup}); toast('Restore: '+JSON.stringify(j)); await loadAll(); }catch(e){ toast('Restore failed: '+e.message+'\n'+JSON.stringify(e.data||{},null,2), true); } }
+async function loadEvents(){
+  try{ const rows=await api('GET','/events?limit=50'); document.getElementById('eventsList').innerHTML = rows.length ? `<table><tr><th>Time</th><th>Kind</th><th>Server</th><th>Client</th><th>Message</th></tr>${rows.map(e=>`<tr><td>${fmtTime(e.ts)}</td><td><span class="badge gray">${esc(e.kind)}</span></td><td>${esc(e.server_id||'')}</td><td>${esc(e.client_id||'')}</td><td>${esc(e.message||'')}</td></tr>`).join('')}</table>` : '<p class="muted">Журнал пуст.</p>'; }catch(e){ document.getElementById('eventsList').innerHTML='<p class="bad">Не удалось загрузить events</p>'; }
+}
+refreshAuth().catch(e=>toast('Ошибка инициализации: '+e.message, true));
+</script>
+</body>
+</html>

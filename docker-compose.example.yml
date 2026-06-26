@@ -1,0 +1,21 @@
+services:
+  awg-web-gui:
+    build:
+      context: .
+    image: awg-web-gui:latest
+    container_name: awg-web-gui
+    restart: unless-stopped
+    environment:
+      AWG_SECRET_KEY: "change-me-long-random-string"
+      AWG_DATA_DIR: /data
+      AWG_POLL_INTERVAL: "30"
+      AWG_ONLINE_THRESHOLD: "180"
+      AWG_METADATA_REFRESH_INTERVAL: "300"
+      PORT: "5173"
+    ports:
+      - "8095:5173"
+    volumes:
+      - ./data:/data
+      # Optional: mount SSH keys for server access.
+      # In GUI use key path like /ssh/id_ed25519
+      - ./ssh:/ssh:ro

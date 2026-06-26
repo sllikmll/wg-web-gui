@@ -1,0 +1,4 @@
+﻿Flask>=3.1,<4
+qrcode[pil]>=7.4
+PyNaCl>=1.5
+MarkupSafe>=2.1
